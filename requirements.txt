@@ -3,6 +3,7 @@ uvicorn[standard]
 
 
 psycopg[binary]
+asyncpg
 alembic
 
 pydantic
