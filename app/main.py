@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from app.core.config import settings
 from app.core.database import create_pool
 from app.core.logging import configure_logging
+from app.modules.batches.router import router as batches_router
 import logging
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,11 @@ app = FastAPI(
     description="Broiler farm management API for Kenyan smallholder farmers",
     version=settings.app_version,
     lifespan=lifespan,
+    docs_url="/api/docs",
+
 )
+
+app.include_router(batches_router, prefix="/api/v1")
 
 @app.get("/health", tags=["health"])
 async def health_check():

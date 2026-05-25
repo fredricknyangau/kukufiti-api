@@ -1,3 +1,4 @@
+# structured JSON logging config
 import logging
 
 import structlog
@@ -6,19 +7,16 @@ import structlog
 def configure_logging(log_level: str = "INFO") -> None:
     """
     Configure logging for the application using structlog.
-    
     Args:
         log_level: The logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
     """
     # Convert string log level to logging level
     numeric_level = getattr(logging, log_level.upper(), logging.INFO)
-    
     # Configure standard library logging
     logging.basicConfig(
         level=numeric_level,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
-    
     # Configure structlog
     structlog.configure(
         processors=[

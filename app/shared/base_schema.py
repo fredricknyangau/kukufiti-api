@@ -1,0 +1,1 @@
+# common Pydantic config (camelCase, etc.)

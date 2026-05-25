@@ -1,4 +1,6 @@
 services:
+
+# PostgreSQL
   postgres:
     image: postgres:16-alpine
     container_name: kukufiti_postgres
@@ -17,27 +19,45 @@ services:
       timeout: 5s
       retries: 5
 
+# API Server
   api:
     build:
       context: .
       dockerfile: Dockerfile
+      target: runtime
     container_name: kukufiti_api
     env_file:
       - .env
-    environment:
-      DATABASE_URL: postgresql://fred:postgres_local@postgres:5432/kukufiti_dev
-      BATCHES_DB_URL: postgresql://batches_app:batches_dev@postgres:5432/kukufiti_dev
-      FINANCE_DB_URL: postgresql://finance_app:finance_dev@postgres:5432/kukufiti_dev
-      HEALTH_DB_URL: postgresql://health_app:health_dev@postgres:5432/kukufiti_dev
-      AUTH_DB_URL: postgresql://auth_app:auth_dev@postgres:5432/kukufiti_dev
     ports:
       - "8001:8000"
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
+          # Hot reload in development — mount source code
       - ./app:/app/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: >
+      uvicorn app.main:app
+        --host 0.0.0.0
+        --port 8000
+        --reload
+        --reload-dir /app/app  
 
+  # Migration Runner 
+  # migrate:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #     target: runtime
+  #   container_name: kukufiti_migrate
+  #   env_file:
+  #     - .env
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   command: ["python", "-m", "scripts.run_migration"]
+  #   # Run once and exit — not a long-lived service
+  #   restart: "no"
+    
 volumes:
   postgres_data:

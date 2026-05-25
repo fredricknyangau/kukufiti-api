@@ -1,0 +1,1 @@
+# UUID aliases, KES money type, etc.

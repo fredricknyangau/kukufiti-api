@@ -1,0 +1,8 @@
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B"]
+# B008: FastAPI's Depends(), Query(), Path(), Body() etc. in default arguments
+# are the framework's canonical dependency injection pattern — not a bug.
+ignore = ["B008"]

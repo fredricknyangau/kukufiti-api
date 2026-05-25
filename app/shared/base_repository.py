@@ -1,0 +1,1 @@
+# abstract base with common query helpers
