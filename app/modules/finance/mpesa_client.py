@@ -8,11 +8,6 @@ from decimal import Decimal
 import httpx
 
 from app.core.config import settings
-from app.modules.finance.exceptions import (
-    MpesaAuthError,
-    MpesaRequestError,
-    MpesaValidationError,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -210,3 +205,30 @@ class MpesaClient:
         )
 
         return data
+
+
+# ── INTERNAL CLIENT EXCEPTIONS ────────────────────────────────────────────
+# These are low-level exceptions raised inside MpesaClient only.
+# They are NOT HTTP-mapped — FinanceService catches them and re-raises
+# MpesaInitiationError (from finance/exceptions.py) which the global
+# handler in main.py converts to an HTTP 502 response.
+
+class MpesaError(Exception):
+    """Base for all internal M-Pesa client errors.
+    Catch this in FinanceService to handle any Daraja failure uniformly.
+    """
+
+class MpesaAuthError(MpesaError):
+    """OAuth token acquisition from Daraja failed.
+    Raised by get_access_token() on non-200 status or missing token field.
+    """
+
+class MpesaRequestError(MpesaError):
+    """Daraja rejected the STK push request.
+    Raised by initiate_stk_push() on non-200 response or errorCode in body.
+    """
+
+class MpesaValidationError(MpesaError):
+    """Input failed local validation before calling Daraja.
+    Raised by initiate_stk_push() when amount < 1 KES.
+    """

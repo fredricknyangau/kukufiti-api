@@ -6,22 +6,31 @@ This project is being built as a modular FastAPI backend. The long-term goal is 
 
 ## Current Status
 
-What exists today:
+What exists and works today:
 
 - FastAPI application shell in `app/main.py`
-- `/health` endpoint that checks the batches database connection
-- Docker Compose setup for PostgreSQL and the API
+- `/health` endpoint that checks all four module database pools
+- Docker Compose setup for PostgreSQL, migration runner, and the API
 - PostgreSQL schema-per-module foundation through `scripts/init_db.sql`
 - Separate database roles for `batches`, `finance`, `health`, `auth`, and `core`
-- Module folder structure for batches, finance, health, and auth
-- First batches migration: `migrations/batches/001_create_batches_tables.sql`
-- Manual migration runner: `scripts/run_migration.py`
+- **Batches module: fully implemented** — router, service, repository, schemas, models
+  - `POST /api/v1/batches/` — create batch
+  - `GET /api/v1/batches/` — list with filtering and real pagination count
+  - `GET /api/v1/batches/{id}` — get batch by ID
+  - `PATCH /api/v1/batches/{id}/status` — transition status
+  - `POST /api/v1/batches/{id}/close` — convenience close endpoint
+  - `GET /api/v1/batches/{id}/summary` — computed summary (FCR, mortality rate)
+- **Finance module: fully implemented** — isolated schema, M-Pesa STK push
+  - `POST /api/v1/finance/transactions/income` — record manual income
+  - `POST /api/v1/finance/transactions/expense` — record manual expense
+  - `GET /api/v1/finance/batches/{batch_id}/transactions` — list transactions
+  - `GET /api/v1/finance/batches/{batch_id}/pl` — profit & loss summary
+  - `POST /api/v1/finance/mpesa/stk-push` — initiate Daraja payment
+  - `POST /api/v1/finance/mpesa/callback` — Daraja webhook handler (unauthenticated)
+- Migration runner with tracking: `scripts/run_migration.py` (idempotent, transactional)
 
-Planned, not fully implemented yet:
+Planned, not yet implemented:
 
-- Batches API endpoints and service layer
-- Finance income/expense tracking
-- M-Pesa Daraja integration
 - Health logs and alert rules
 - OTP/JWT authentication
 - Automated test suite
@@ -85,7 +94,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-The local `.env.example` is configured for PostgreSQL running in Docker on host port `5434`.
+The local `.env.example` is configured for PostgreSQL running in Docker on host port `5432`.
 
 If your shell has a non-boolean `DEBUG` variable exported, Pydantic may reject it. Fix that with:
 
@@ -117,8 +126,8 @@ python3.12 -m uvicorn app.main:app --reload
 
 Open:
 
-- API health check: `http://localhost:8001/health`
-- Swagger docs: `http://localhost:8001/docs`
+- API health check: `http://localhost:8000/health`
+- Swagger docs: `http://localhost:8000/docs`
 
 ### Option 2: Run everything with Docker Compose
 
@@ -128,10 +137,10 @@ docker compose up --build
 
 Open:
 
-- API health check: `http://localhost:8001/health`
-- Swagger docs: `http://localhost:8001/docs`
+- API health check: `http://localhost:8000/health`
+- Swagger docs: `http://localhost:8000/docs`
 
-The API container listens on port `8001` inside Docker and is exposed as `8001` on your machine.
+The API container listens on port `8000` inside Docker and is exposed as `8000` on your machine.
 
 ## Database Architecture
 
@@ -163,38 +172,49 @@ Docker runs that file automatically the first time the PostgreSQL volume is crea
 
 ## Migrations
 
+Migrations are tracked in `public.schema_migrations`. Re-running a migration
+that has already been applied is safe — it prints a skip message and exits 0.
+
 Run migrations from the `kukufiti-api/` directory.
 
-The correct module path is:
+### Run all pending migrations (recommended)
+
+```bash
+python3.12 -m scripts.run_migration --all
+```
+
+This is also what `docker compose up` runs automatically via the `migrate` service.
+
+### Run a single specific migration
+
+```bash
+python3.12 -m scripts.run_migration <module> <migration_id>
+```
+
+Examples:
 
 ```bash
 python3.12 -m scripts.run_migration batches 001
+python3.12 -m scripts.run_migration finance 001
 ```
 
-Do not prefix the migration module with `app.`. There is no `app/scripts/` package in this repo. The migration runner lives in the top-level `scripts/` directory.
-
-Current migration:
+Current migrations:
 
 ```text
 migrations/batches/001_create_batches_tables.sql
+migrations/finance/001_create_finance_tables.sql
 ```
 
-It creates:
-
-- `batches.batches`
-- `idx_batches_status`
-- `idx_batches_start_date`
-
-## Available Endpoint
+## Available Endpoints
 
 ### `GET /health`
 
-Checks that the API is alive and can connect to the batches database.
+Checks that the API is alive and can connect to **all** module databases.
 
 Example:
 
 ```bash
-curl http://localhost:8001/health
+curl http://localhost:8000/health
 ```
 
 Expected healthy response:
@@ -202,15 +222,63 @@ Expected healthy response:
 ```json
 {
   "status": "healthy",
-  "database": "connected",
+  "databases": {
+    "batches": "connected",
+    "finance": "connected",
+    "health": "connected",
+    "auth": "connected"
+  },
   "version": "0.1.0"
 }
 ```
 
-If running through Docker Compose, use port `8001`:
+### Finance Commands (curl)
+
+First, set your variables. Since the auth module is pending, use the dev token generator:
 
 ```bash
-curl http://localhost:8001/health
+BATCH_ID="your-batch-uuid"
+TOKEN="your-dev-jwt-token"
+```
+
+**1. List all transactions for a batch:**
+```bash
+curl -s -X GET "http://localhost:8000/api/v1/finance/batches/$BATCH_ID/transactions" \
+  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+```
+
+**2. Record an expense:**
+```bash
+curl -s -X POST http://localhost:8000/api/v1/finance/transactions/expense \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "batch_id": "'$BATCH_ID'",
+    "category": "feed",
+    "amount_kes": 15000.00,
+    "transaction_date": "2026-06-09",
+    "notes": "Starter feed purchase"
+  }' | python3 -m json.tool
+```
+
+**3. View Profit & Loss (P&L):**
+```bash
+curl -s -X GET "http://localhost:8000/api/v1/finance/batches/$BATCH_ID/pl" \
+  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+```
+
+**4. Initiate M-Pesa STK Push:**
+```bash
+curl -s -X POST http://localhost:8000/api/v1/finance/mpesa/stk-push \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "batch_id": "'$BATCH_ID'",
+    "phone_number": "254700000000",
+    "amount_kes": 1,
+    "category": "bird_sales",
+    "description": "batch payment"
+  }' | python3 -m json.tool
 ```
 
 ## Command Reference
@@ -272,7 +340,7 @@ python3.12 -m uvicorn app.main:app --reload
 Run the API locally with an explicit host and port:
 
 ```bash
-python3.12 -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+python3.12 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 Run PostgreSQL and the API with Docker Compose:
@@ -304,37 +372,37 @@ docker compose down -v
 Check the API when running locally with Uvicorn:
 
 ```bash
-curl http://localhost:8001/health
+curl http://localhost:8000/health
 ```
 
 Check the API when running through Docker Compose:
 
 ```bash
-curl http://localhost:8001/health
+curl http://localhost:8000/health
 ```
 
 Fail fast if the Docker Compose health check is unhealthy:
 
 ```bash
-curl -fsS http://localhost:8001/health
+curl -fsS http://localhost:8000/health
 ```
 
 Open these URLs in your browser:
 
 ```text
-http://localhost:8001/docs
-http://localhost:8001/docs
+http://localhost:8000/docs
+http://localhost:8000/redoc
 ```
 
 ### Migrations
 
-Run the current batches migration:
+Run all pending migrations:
 
 ```bash
-python3.12 -m scripts.run_migration batches 001
+python3.12 -m scripts.run_migration --all
 ```
 
-Run a migration for another module:
+Run a single migration:
 
 ```bash
 python3.12 -m scripts.run_migration <module> <migration_id>
@@ -343,15 +411,10 @@ python3.12 -m scripts.run_migration <module> <migration_id>
 Examples:
 
 ```bash
+python3.12 -m scripts.run_migration batches 001
 python3.12 -m scripts.run_migration finance 001
 python3.12 -m scripts.run_migration health 001
 python3.12 -m scripts.run_migration auth 001
-```
-
-Check Alembic's current revision if Alembic migrations are added later:
-
-```bash
-.venv/bin/alembic current
 ```
 
 ### Database
@@ -473,14 +536,7 @@ The full build plan lives in:
 
 Current next steps:
 
-- Implement the batches repository, service, schemas, and router
-- Register the batches router in `app/main.py`
-- Add manual API checks for create/list/get/close/summary flows
-- Add tests once the first vertical slice is working
-
-Later planned modules:
-
-- Finance and M-Pesa payments
-- Health logs and alerts
-- OTP/JWT auth
-- Test coverage and deployment
+- Add tests for the batches and finance vertical slices (unit + integration)
+- Implement health logs and alert rules
+- Add OTP/JWT auth module
+- Configure test coverage and production deployment

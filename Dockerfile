@@ -1,7 +1,7 @@
 #==============================================================================
 # Stage 1: Builder — installs dependencies, compiles nothing to the final image
 #==============================================================================
-FROM python:3.12.2-slim-bookworm AS Builder
+FROM python:3.12.2-slim-bookworm AS builder
 
 # Prevents Python from writing .pyc files — saves space in image
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -64,7 +64,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
 EXPOSE 8000
 
 # Default entrypoint — overridden per service in docker-compose / K8s
+# NOTE: --reload is intentionally absent here. Add it only in the
+# docker-compose command: override for development environments.
 CMD ["python", "-m", \
      "uvicorn", "app.main:app", \
      "--host", "0.0.0.0", \
-     "--port", "8000", "--reload"]
+     "--port", "8000"]
